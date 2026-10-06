@@ -1315,7 +1315,12 @@ export function registerEvaluationRoutes(app: express.Express) {
     }
 
     const { corrections } = req.body as {
-      corrections: { questionId: string; isCorrect: boolean; correctedAnswer?: string }[];
+      // #459: optional errorType lets a teacher label the error cause during the
+      // #410 human-diagnosis pass — 'conceptual' | 'careless' | 'prerequisite'
+      // or any string. When supplied it wins over the deterministic classifier
+      // (classifyErrorType) so a non-numeric answer that would otherwise stay
+      // 'unclassified' carries the teacher's diagnosis instead.
+      corrections: { questionId: string; isCorrect: boolean; correctedAnswer?: string; errorType?: string }[];
     };
     if (!Array.isArray(corrections) || corrections.length === 0) {
       return res.status(400).json({ error: '`corrections` must be a non-empty array.' });
@@ -1361,6 +1366,16 @@ export function registerEvaluationRoutes(app: express.Express) {
         const answersForAnalysis: { [questionId: string]: string } = {};
         for (const q of updatedQuestionResults) answersForAnalysis[q.questionId] = q.submittedAnswer;
         updatedRootCauses = computeRootCauseAnalysis({}, matchedQuestions, answersForAnalysis).rootCauses;
+        // #459: teacher-supplied errorType wins over the deterministic classifier.
+        // Applied after computeRootCauseAnalysis so the teacher's label replaces
+        // whatever classifyErrorType() produced — covers non-numeric answers that
+        // would otherwise stay 'unclassified' (e.g. word problems, written expressions).
+        if (updatedRootCauses) {
+          updatedRootCauses = updatedRootCauses.map(rc => {
+            const correction = correctionMap.get(rc.questionId);
+            return correction?.errorType ? { ...rc, errorType: correction.errorType } : rc;
+          });
+        }
       }
     } catch (error) {
       console.error('[override] Failed to recompute rootCauses after correction:', error);

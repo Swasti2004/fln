@@ -26,6 +26,7 @@
     "audit:aadhaar": "tsx scripts/audit-aadhaar-at-rest.ts",
     "test:answer-matching": "tsx src/answerMatching.test.ts",
     "test:error-classification": "tsx src/errorClassification.test.ts",
+    "test:root-cause-analysis": "tsx src/rootCauseAnalysis.test.ts",
     "test:paper-lock": "tsx src/paperLock.test.ts",
     "test:competency-prerequisites": "tsx src/competencyPrerequisites.test.ts"
   },
