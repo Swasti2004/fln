@@ -1356,11 +1356,11 @@ export function registerEvaluationRoutes(app: express.Express) {
       const worksheets = await dbStore.getWorksheets();
       const ws = worksheets.find(w => w.id === report.worksheetId);
       if (ws) {
-        const resultIds = new Set(updatedQuestionResults.map(q => q.questionId));
-        const matchedQuestions = ws.questions.filter(q => resultIds.has(q.question_id));
+        const stillWrongIds = new Set(updatedQuestionResults.filter(q => !q.isCorrect).map(q => q.questionId));
+        const matchedQuestions = ws.questions.filter(q => stillWrongIds.has(q.question_id));
         const answersForAnalysis: { [questionId: string]: string } = {};
         for (const q of updatedQuestionResults) answersForAnalysis[q.questionId] = q.submittedAnswer;
-        updatedRootCauses = computeRootCauseAnalysis({}, matchedQuestions, answersForAnalysis).rootCauses;
+        updatedRootCauses = computeRootCauseAnalysis({}, matchedQuestions, answersForAnalysis).rootCauses ?? [];
       }
     } catch (error) {
       console.error('[override] Failed to recompute rootCauses after correction:', error);
