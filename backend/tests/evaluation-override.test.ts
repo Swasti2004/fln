@@ -29,6 +29,7 @@ process.env.SEED_DEMO_PASSWORD = 'Fln@2026';
 const { dbStore } = await import('../src/db');
 const { JWT_SECRET } = await import('../src/auth');
 const { registerEvaluationRoutes } = await import('../src/routes/evaluation');
+const { computeRootCauseAnalysis } = await import('../src/rootCauseAnalysis');
 const express = (await import('express')).default;
 const jwtLib = (await import('jsonwebtoken')).default;
 
@@ -226,4 +227,23 @@ test('Case 3: correcting all wrong answers sets rootCauses to an empty array', a
   const rootCauses = res.json.report.rootCauses;
   assert.ok(Array.isArray(rootCauses), 'rootCauses should be an array');
   assert.equal(rootCauses.length, 0, 'rootCauses should be empty when no errors remain');
+});
+
+test('Case 4: choiceErrorTags lookup on wrong choices sets tagged errorType (#627, #693)', () => {
+  const result = computeRootCauseAnalysis(
+    {},
+    [
+      {
+        question_id: 'q1',
+        answer: 'Option A',
+        topic: 'shapes',
+        source_level: 20,
+        choiceErrorTags: { 'Option B': 'under-inclusion' },
+      } as any,
+    ],
+    { q1: 'Option B' }
+  );
+
+  assert.ok(result.rootCauses && result.rootCauses.length > 0, 'rootCauses should not be empty');
+  assert.equal(result.rootCauses[0].errorType, 'under-inclusion', 'errorType should match tagged choice');
 });
