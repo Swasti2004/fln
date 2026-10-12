@@ -87,15 +87,15 @@ During in-depth analysis of the repository while implementing and testing featur
 - **What:** When a teacher used `PATCH /api/evaluation/:reportId/override` to correct an OCR misread or grading error, the handler updated the numerical score (`score: newScore`) but never recomputed `rootCauses`. Furthermore, it never invalidated the student's cached misconception fingerprint or recomputed their archetype cluster.
 - **Why it matters:** If a child was erroneously marked wrong for writing "7", the system permanently flagged them with a misconception and assigned them to a remedial archetype, even after the teacher corrected the score to 100%.
 
-### Gap 3: Human Educator Diagnoses Overridden by Rigid Automated Fallbacks
+### Gap 3: Human Educator Diagnoses Lost in Overrides & Choice Error Tags Disconnected
 - **Where:** `backend/src/routes/evaluation.ts` and `backend/src/rootCauseAnalysis.ts`
-- **What:** The root cause calculation relied solely on automated classification (`classifyErrorType`), which defaults to `"unclassified"` for any non-trivial error. When teachers performed manual reviews and identified the exact pedagogical reason for an error (e.g., conceptual misunderstanding), there was no schema or parameter to capture and persist the teacher's diagnosis.
-- **Why it matters:** The system discarded the highest-fidelity diagnostic signal available: the live classroom teacher's expert judgment.
+- **What:** The root cause calculation relied solely on automated classification (`classifyErrorType`), which defaults to `"unclassified"` for any non-trivial error. When teachers performed manual reviews and identified the exact pedagogical reason for an error (e.g., conceptual misunderstanding), there was no schema or parameter to capture and persist the teacher's diagnosis. Additionally, `readPipelineDetail` called `classifyErrorType` without passing the question object (`q`), dropping rich MCQ `choiceErrorTags` (e.g. `'under-inclusion'`).
+- **Why it matters:** The system discarded the highest-fidelity diagnostic signal available: the live classroom teacher's expert judgment and question-author misconception tags.
 
 ### Gap 4: Static Curriculum Graph Unable to Evolve with Classroom Realities
 - **Where:** `backend/src/config/curriculumMap.ts` and `backend/src/db.ts`
-- **What:** The curriculum was locked into a static 93-node competency graph. There was no structured mechanism or API for teachers and curriculum designers to propose new micro-skills discovered during interventions, link them to classroom evidence, or review them through an expert validation workflow.
-- **Why it matters:** Real foundational teaching regularly uncovers unmapped micro-competencies (e.g., distinguishing between standard numerals and number words, or directional subitizing). Without a dynamic evolution loop, the curriculum remains rigid.
+- **What:** The curriculum was locked into a static 93-node competency graph. There was no structured mechanism, database schema, or REST API for discovering emerging micro-skills from learner error patterns, persisting them with attempt evidence, or facilitating human-in-the-loop validation by curriculum experts.
+- **Why it matters:** Real foundational teaching regularly uncovers unmapped micro-competencies (e.g., regrouping across tens boundaries, place-value digit reversal). Without a dynamic evolution loop, the curriculum remains rigid and cannot adapt to empirical field data.
 
 ---
 
@@ -109,7 +109,7 @@ During in-depth analysis of the repository while implementing and testing featur
 ### Idea 2: Expert Curriculum Evolution & Candidate Skill Review Panel
 - **What:** Develop an administrative management view for curriculum experts to review and graduate proposed candidate skills.
 - **Why:** Operationalizes the backend D1.6 Skill Evolution API (`POST /api/skills/candidates/:id/validate`) so curriculum leads can review evidence and promote emergent skills into the live curriculum without direct database manipulation.
-- **How:** A panel component under the Admin / Curriculum navigation that fetches `GET /api/skills/candidates?status=under_review`, displays supporting evidence and classroom observations, and provides "Approve & Promote" or "Reject" actions.
+- **How:** A panel component under the Admin / Curriculum navigation that fetches `GET /api/skills/candidates?status=PENDING`, displays supporting evidence and classroom observations, and provides "ACCEPT", "REJECT", "MERGE", "SPLIT", and "REDEFINE" actions.
 
 ### Idea 3: Unified Cross-Service Answer Normalization Specification
 - **What:** Create a centralized, language-agnostic test suite and normalization spec shared between the TypeScript backend (`answerMatching.ts`) and Python OCR service (`1_compare_answers.py`).
@@ -120,29 +120,41 @@ During in-depth analysis of the repository while implementing and testing featur
 
 ## 6. Your Contribution
 
-As part of my onboarding, I have actively worked on and submitted **four focused Pull Requests** addressing the core diagnostic, evaluation, and curriculum capabilities of the platform:
+As part of my onboarding, I have actively worked on and contributed to **multiple core areas** across diagnostic evaluation, scaffolding schemas, curriculum evolution, and onboarding documentation:
 
-### 1. PR #654 (Issue #479): Granular AttemptRecord Evidence Schema
-- **Code:** Implemented the `AttemptRecord` schema in `backend/src/db.ts` featuring the authoritative 0–4 scaffolding scale (`0 = unprompted`, `4 = full direct instruction`), representation styles, and error classifications.
-- **Database:** Added `addAttemptRecord()` and indexed read method `getAttemptRecordsForStudent()` with an index on `studentId: 1`.
-- **Testing:** Created regression tests validating student isolation and record retrieval.
+### 1. PR #654 (Issue #479): Granular AttemptRecord Evidence Schema [MERGED]
+- **Data Model:** Authored and integrated the `AttemptRecord` interface in `backend/src/db.ts`, implementing the 0–4 scaffolding scale (`0 = unprompted`, `1 = verbal hint`, `2 = visual manipulative`, `3 = guided steps`, `4 = full direct instruction`), representation styles, and error classifications.
+- **Database Methods:** Added `addAttemptRecord()` and indexed read method `getAttemptRecordsForStudent()`, complete with MongoDB index registration (`studentId: 1`) and file-store fallback support.
+- **Test Suite:** Built comprehensive regression tests in `backend/tests/attempt-records.test.ts` (`npm run test:attempts`) proving isolation across students, correct scaffolding persistence, and error type preservation.
+- **Status:** **Merged into upstream main.**
 
-### 2. PR #673 (Issue #402): Real-Time Root Cause & Archetype Synchronization on Teacher Override
-- **Architecture:** Extracted per-question root-cause analysis out of `students.ts` into a clean, reusable module: `backend/src/rootCauseAnalysis.ts`.
-- **Logic:** Wired `PATCH /api/evaluation/:reportId/override` to recompute `rootCauses` only for questions that remain wrong (`stillWrongIds`), clearing causes to `[]` when all answers are corrected.
-- **Fingerprinting:** Connected `invalidateFingerprintCache()` and `assignStudentToArchetype()` to ensure the student's misconception profile updates immediately upon manual correction.
-- **Testing:** Created `backend/tests/evaluation-override.test.ts` (runnable via `npm run test:evaluation-override`) covering HTTP override behaviors against live reports.
+### 2. PR #673 (Issue #402): Real-Time Root Cause & Archetype Synchronization on Teacher Override [MERGED]
+- **Refactoring & Modularity:** Extracted the root cause calculation engine out of `backend/src/routes/students.ts` into a dedicated, clean service module: `backend/src/rootCauseAnalysis.ts`.
+- **Pipeline & Tags Integration:** Preserved `choiceErrorTags` lookup across overrides (`classifyErrorType(submitted, expected, q)`), ensuring questions tagged with pedagogical error markers (e.g. `under-inclusion`) reflect accurate diagnostic codes.
+- **Override Logic:** Updated `PATCH /api/evaluation/:reportId/override` to recompute `rootCauses` only for questions that remain wrong after teacher correction, resetting `rootCauses` to an empty array `[]` when all answers are corrected.
+- **Archetype Invalidation:** Wired `invalidateFingerprintCache()` and `assignStudentToArchetype()` so that a teacher's grade correction immediately updates the student's misconception cluster and fingerprint.
+- **Testing:** Implemented `backend/tests/evaluation-override.test.ts` (`npm run test:evaluation-override`) covering HTTP endpoint behaviors, partial corrections, full corrections, and `choiceErrorTags`.
+- **Status:** **Merged into upstream main.**
 
-### 3. PR #700 (Issue #459): Teacher-in-the-Loop Error Classification
-- **Feature:** Extended the override endpoint payload to accept `errorType?: string` within `corrections[]`.
-- **Pedagogy:** Ensured that human educator diagnoses take precedence over deterministic regex classifier fallbacks when errors are manually reviewed.
-- **Testing:** Added test suite asserting teacher error type overlay precedence.
+### 3. PR #701 (Issue #481): D1.6 Skill Evolution & Expert Validation Framework [UNDER REVIEW]
+- **Ontology & Schemas:** Defined `CandidateSkill` and `Skill` interfaces in `backend/src/db.ts` with lifecycle statuses (`PENDING`, `ACCEPTED`, `REJECTED`, `MERGED`, `SPLIT`, `REDEFINED`) and `source_type: 'DISCOVERED_DATA'`.
+- **REST Endpoints:** Created `backend/src/routes/skillEvolution.ts` providing 5 endpoints:
+  - `GET /api/skills/candidates`: Filter candidates by status and parent skill.
+  - `GET /api/skills/candidates/:id`: Retrieve single candidate record with evidence.
+  - `POST /api/skills/candidates`: Submit discovered candidate with duplicate ID guard (HTTP 409).
+  - `POST /api/skills/candidates/:id/validate`: Superadmin human-in-the-loop validation with `ACTION_TO_STATUS` mapping.
+  - `GET /api/skills`: Retrieve active skills including discovered data.
+- **Dual-Storage Persistence:** Updated `addCandidateSkill`, `updateCandidateSkill`, and `addSkill` in `backend/src/db.ts` to ensure `await this.save()` executes on file-store mutations when running without MongoDB.
+- **Testing:** Implemented unit tests (`npm run test:skill-evolution`) and end-to-end HTTP route tests (`npm run test:skill-evolution-routes`).
+- **Status:** Review feedback from maintainer fully addressed and pushed.
 
-### 4. PR #701 (Issue #481): D1.6 Skill Evolution & Expert Validation Framework
-- **Data Model:** Defined `CandidateSkill` and `Skill` schemas in `backend/src/db.ts`, supporting lifecycle states (`proposed`, `under_review`, `validated`, `rejected`) and evidence linking.
-- **REST Endpoints:** Built 5 production routes in `backend/src/routes/skillEvolution.ts`:
-  - `GET /api/skills/candidates` & `GET /api/skills/candidates/:id`
-  - `POST /api/skills/candidates`
-  - `POST /api/skills/candidates/:id/validate`
-  - `GET /api/skills`
-- **Testing:** Created unit and integration tests in `backend/src/skillEvolution.test.ts` verifying proposal, status transitions, and graduation into active skills.
+### 4. PR #726: Contributor Onboarding Documentation [MERGED]
+- **Documentation:** Authored the comprehensive onboarding guide at `Ideas/ONBOARDING-swasti.md` following repository requirements, detailing system context, data models, observed codebase gaps, strategic project proposals, and contribution milestones.
+- **Status:** **Merged into upstream main.**
+
+### 5. Issue #459: Teacher-in-the-Loop ErrorType Override [NEW PR]
+- **Targeted Endpoint:** Updated `PATCH /api/evaluation/:reportId/override` to accept an optional `errorType` per question in `corrections[]`.
+- **Whitelist Validation:** Implemented strict HTTP 400 validation checking against approved values (deterministic classifier types: `unanswered`, `digit_reversal`, `decimal_place_shift`, `off_by_one`, `unclassified`; plus pedagogical diagnostic labels: `conceptual`, `careless`, `prerequisite`).
+- **Precedence Logic:** Overlaid teacher-supplied diagnostic labels onto still-wrong questions in `rootCauses`, allowing human pedagogical insights to supersede automated classifier fallbacks.
+- **Testing:** Added Case 5 (400 validation) and Case 6 (teacher errorType override) in `backend/tests/evaluation-override.test.ts`.
+- **Status:** Implemented in branch `fix/teacher-error-type-override-459`, tested, and pushed for PR creation.
